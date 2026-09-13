@@ -55,7 +55,7 @@ def build_base_plate(shape, w, h, t):
         c1.apply_translation([12.5, 0, 0])
         c2.apply_translation([0, 12.5, 0])
         heart = trimesh.util.concatenate([box, c1, c2])
-        heart.apply_rotation(trimesh.transformations.rotation_matrix(np.radians(-45), [0, 0, 1]))
+        heart.apply_rotation(trimesh.transformations.rotation_matrix(np.radians(-45),))
         heart.apply_scale([w / 35.0, h / 35.0, 1.0])
         return heart
     else: # License Plate Rounded Box Style
@@ -80,30 +80,26 @@ try:
         word_mesh.apply_translation([0, 0, z_offset])
         meshes_to_combine.append(word_mesh)
 
-    # 3. Process Hole Attachments
+    # 3. Process Ring Attachments (No complex math cuts required!)
     if hole_preset != "No Attachment Hole" and base_mesh:
-        edge_x = plate_w / 2.0 - 4
-        edge_y = plate_h / 2.0 - 4
+        edge_x = plate_w / 2.0 - 2
+        edge_y = plate_h / 2.0 - 2
         
         pos_map = {
-            "Top Center": [0, edge_y, 0],
-            "Left Top Corner": [-edge_x, edge_y, 0],
-            "Left Middle": [-edge_x, 0, 0],
-            "Left Bottom Corner": [-edge_x, -edge_y, 0],
-            "Right Top Corner": [edge_x, edge_y, 0],
-            "Right Middle": [edge_x, 0, 0],
-            "Right Bottom Corner": [edge_x, -edge_y, 0]
+            "Top Center": [0, edge_y + 3, 0],
+            "Left Top Corner": [-edge_x - 2, edge_y + 2, 0],
+            "Left Middle": [-edge_x - 3, 0, 0],
+            "Left Bottom Corner": [-edge_x - 2, -edge_y - 2, 0],
+            "Right Top Corner": [edge_x + 2, edge_y + 2, 0],
+            "Right Middle": [edge_x + 3, 0, 0],
+            "Right Bottom Corner": [edge_x + 2, -edge_y - 2, 0]
         }
         
         if hole_preset in pos_map:
-            # Cut an actual physical hole out of the structure
-            hole_cutter = trimesh.creation.cylinder(radius=2.5, height=plate_thick + 2)
-            hole_cutter.apply_translation(pos_map[hole_preset])
-            if base_mesh:
-                base_mesh = base_mesh.difference(hole_cutter)
-                meshes_to_combine = [base_mesh]
-                if text_input and text_style != "Completely Flat Surface":
-                    meshes_to_combine.append(word_mesh)
+            # Build an attachment ring loops tab sticking outwards
+            ring_anchor = trimesh.creation.cylinder(radius=5.0, height=plate_thick)
+            ring_anchor.apply_translation(pos_map[hole_preset])
+            meshes_to_combine.append(ring_anchor)
 
     # Compile Final Object Model
     if meshes_to_combine:
@@ -119,7 +115,7 @@ try:
         col1, col2 = st.columns(2)
         
         with col1:
-            st.success("🎉 Watertight 3D Model Compiled!")
+            st.success("🎉 Watertight 3D Model Compiled Successfully!")
             if text_style == "Raised Words (Embossed)":
                 st.info(f"🎨 **Filament Swap Blueprint:**\n\n"
                         f"• Pause printer exactly at **{plate_thick:.1f}mm**\n"
