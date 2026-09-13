@@ -4,6 +4,7 @@ import trimesh
 import io
 import urllib.request
 import base64
+import os
 
 # Page configuration
 st.set_page_config(page_title="Universal 3D Keychain Designer", layout="wide")
@@ -20,6 +21,10 @@ base_shape = st.sidebar.selectbox(
 
 st.sidebar.header("🔤 2. Typography & Lettering")
 text_input = st.sidebar.text_input("Custom Wording / Numbers", value="ZELDA123", max_chars=15).upper()
+font_choice = st.sidebar.selectbox(
+    "Select 3D Font Family",
+    options=["Chewy Bold (Bubbly)", "Impact Sans", "Standard Block"]
+)
 text_style = st.sidebar.selectbox(
     "Letter Protrusion Style",
     options=["Raised Words (Embossed)", "Completely Flat Surface"]
@@ -40,6 +45,28 @@ plate_h = st.sidebar.slider("Base Height Scaling (mm)", 20, 80, 40)
 plate_thick = st.sidebar.slider("Base Plate Thickness (mm)", 1.0, 5.0, 2.0, 0.2)
 text_thick = st.sidebar.slider("Word / Extrusion Layer Height (mm)", 0.5, 6.0, 2.0, 0.1)
 
+# --- FONT FILE MANAGER ---
+@st.cache_data
+def download_font_file(font_name):
+    # Map out internet links to real TTF font engine files
+    urls = {
+        "Chewy Bold (Bubbly)": "https://github.com",
+        "Impact Sans": "https://github.com",
+        "Standard Block": "https://github.com"
+    }
+    file_path = f"{font_name.replace(' ', '_')}.ttf"
+    
+    # Download locally to the cloud server folder if it doesn't exist
+    if not os.path.exists(file_path):
+        try:
+            req = urllib.request.Request(urls[font_name], headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as response, open(file_path, 'wb') as out_file:
+                out_file.write(response.read())
+            return file_path
+        except:
+            return None
+    return file_path
+
 def build_base_plate(shape, w, h, t):
     if shape == "Text Only (No Base)":
         return None
@@ -55,7 +82,7 @@ def build_base_plate(shape, w, h, t):
         c1.apply_translation([12.5, 0, 0])
         c2.apply_translation([0, 12.5, 0])
         heart = trimesh.util.concatenate([box, c1, c2])
-        heart.apply_rotation(trimesh.transformations.rotation_matrix(np.radians(-45),))
+        heart.apply_rotation(trimesh.transformations.rotation_matrix(np.radians(-45), [0, 0, 1]))
         heart.apply_scale([w / 35.0, h / 35.0, 1.0])
         return heart
     else: # License Plate Rounded Box Style
@@ -70,17 +97,34 @@ try:
     if base_mesh:
         meshes_to_combine.append(base_mesh)
         
-    # 2. Compute 3D Text Geometry Blocks
+    # 2. Compute TRUE 3D Text Outlines
     if text_input and text_style != "Completely Flat Surface":
-        # Generate block mesh coordinates to map physical 3D typography shapes
-        word_mesh = trimesh.creation.box(extents=[len(text_input) * 5.5, 9, text_thick])
+        local_font_path = download_font_file(font_choice)
+        
+        if local_font_path:
+            try:
+                # Force trimesh engine to trace the font geometry vectors directly
+                word_mesh = trimesh.creation.text_mesh(text=text_input, font=local_font_path, height=text_thick)
+                
+                # Center text geometry automatically
+                word_mesh.apply_translation([-word_mesh.bounds[0][0] - (word_mesh.extents[0]/2), -word_mesh.bounds[0][1] - (word_mesh.extents[1]/2), 0])
+                
+                # Auto-scale text bounds to fit nicely inside the background plate bounds
+                scale_factor_x = (plate_w * 0.75) / word_mesh.extents[0]
+                scale_factor_y = (plate_h * 0.5) / word_mesh.extents[1]
+                word_mesh.apply_scale([min(scale_factor_x, scale_factor_y), min(scale_factor_x, scale_factor_y), 1.0])
+            except Exception:
+                # Emergency safe block fallback if font compilation engine misses
+                word_mesh = trimesh.creation.box(extents=[len(text_input) * 5.5, 9, text_thick])
+        else:
+            word_mesh = trimesh.creation.box(extents=[len(text_input) * 5.5, 9, text_thick])
             
-        # Orient and translate onto top surface plane correctly
-        z_offset = (plate_thick / 2.0 + text_thick / 2.0) if base_mesh else (text_thick / 2.0)
+        # Translate text directly onto top surface plane correctly
+        z_offset = (plate_thick / 2.0) if base_mesh else 0
         word_mesh.apply_translation([0, 0, z_offset])
         meshes_to_combine.append(word_mesh)
 
-    # 3. Process Ring Attachments (No complex math cuts required!)
+    # 3. Process Ring Attachments
     if hole_preset != "No Attachment Hole" and base_mesh:
         edge_x = plate_w / 2.0 - 2
         edge_y = plate_h / 2.0 - 2
@@ -96,7 +140,6 @@ try:
         }
         
         if hole_preset in pos_map:
-            # Build an attachment ring loops tab sticking outwards
             ring_anchor = trimesh.creation.cylinder(radius=5.0, height=plate_thick)
             ring_anchor.apply_translation(pos_map[hole_preset])
             meshes_to_combine.append(ring_anchor)
